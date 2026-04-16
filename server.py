@@ -1,45 +1,59 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import os
+
+from utils.file_ops import save_encrypted_file, load_decrypted_file
 
 app = FastAPI()
 
-# Folder where encrypted files are stored
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
+# Allow Flutter, mobile, desktop, etc.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # You can restrict this later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # -------------------------------
-# Upload Endpoint
-# -------------------------------
+# Upload (Encrypt + Save)
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+async def upload_file(file: UploadFile):
+    try:
+        raw_bytes = await file.read()
+        save_encrypted_file(file.filename, raw_bytes)
+        return {"message": "File uploaded & encrypted", "file": file.filename}
 
-    # Save encrypted bytes exactly as Flutter sends them
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-
-    return {"message": "File uploaded", "filename": file.filename}
-
-
-# -------------------------------
-# List Files Endpoint
-# -------------------------------
-@app.get("/files")
-def list_files():
-    return os.listdir(UPLOAD_FOLDER)
-
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------------
-# Download Endpoint
-# -------------------------------
+# Download (Decrypt + Stream)
 @app.get("/download/{filename}")
-def download_file(filename: str):
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
+async def download_file(filename: str):
+    try:
+        decrypted_bytes = load_decrypted_file(filename)
 
-    if not os.path.exists(file_path):
-        return {"error": "File not found"}
+        return StreamingResponse(
+            iter([decrypted_bytes]),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
 
-    # Send encrypted file back to Flutter
-    return FileResponse(file_path, filename=filename)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------------
+# List Files
+@app.get("/files")
+async def list_files():
+    folder = "storage/uploads"
+    try:
+        files = os.listdir(folder)
+        return {"files": files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
