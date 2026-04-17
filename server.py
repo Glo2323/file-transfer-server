@@ -48,12 +48,24 @@ async def download_file(filename: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------------
-# List Files
+# -------------------------------
+# List Files (with size + modified date)
+from datetime import datetime
+
 @app.get("/files")
 async def list_files():
     folder = "storage/uploads"
     try:
-        files = os.listdir(folder)
-        return {"files": files}
+        files = []
+        for filename in os.listdir(folder):
+            path = os.path.join(folder, filename)
+            if os.path.isfile(path):
+                stat = os.stat(path)
+                files.append({
+                    "name": filename,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+        return files
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
